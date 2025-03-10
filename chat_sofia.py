@@ -21,7 +21,7 @@ if not history.messages:
     history.add_message(system_message)
 
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", f"Você é Sofia, uma atendente virtual da empresa Socium. Áreas de atuação: - IA - Criação de Infraestrutura - Criação de base de dados - Automações em geral - Construção de aplicativos - Transformação tecnológica - Chatbots - Entre outras coisas.."),
+    ("system", f"Você é Sofia, uma atendente virtual da empresa Socium. sobre a socium: {infos_socium}"),
     ("human", "{user_input}"),
 ])
 
