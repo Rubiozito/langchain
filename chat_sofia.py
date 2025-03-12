@@ -26,8 +26,7 @@ if not history.messages:
     history.add_message(system_message)
 
 def get_recent_chat_history(history, max_messages=10):
-    """Retorna as últimas mensagens do histórico formatadas como contexto."""
-    chat_history = history.messages[-max_messages:]  # Limita ao número máximo de mensagens
+    chat_history = history.messages[-max_messages:] 
     formatted_history = "\n".join(
         [f"{'Você' if isinstance(msg, HumanMessage) else 'Sofia'}: {msg.content}" for msg in chat_history]
     )
