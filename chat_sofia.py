@@ -10,10 +10,10 @@ from info.info_socium import infos_socium
 
 load_dotenv()
 
-model = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+model = ChatOpenAI(model="gpt-4o", api_key=os.getenv("OPENAI_API_KEY"))
 
 mongo_uri = os.getenv("MONGO_URI")
-history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat7", database_name="langchain-socium")
+history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat10", database_name="langchain-socium")
 
 system_message = SystemMessage(
     content="Você é Sofia, uma atendente virtual da empresa Socium."
@@ -80,16 +80,19 @@ client_questions_template = ChatPromptTemplate.from_messages([
             </perguntas>
 
                 **Regras para a conversa:**
+            - **Sempre** confira o histórico e veja quais perguntas já foram feitas.
             - Faça **uma pergunta por vez** e aguarde a resposta antes de continuar.
             - **Nunca repita** uma pergunta que já foi respondida corretamente.
             - Se o cliente não responder corretamente ou der uma resposta vaga, reformule a pergunta para obter uma resposta clara.
             - Use o **histórico de mensagens** para lembrar quais perguntas já foram feitas e garantir um fluxo natural da conversa.
-            - Se todas as perguntas forem respondidas, retorne apenas: "Todas as perguntas foram respondidas."
+            - Se todas as perguntas forem respondidas, não faça mais perguntas e avise o cliente que você tem todas as informações necessárias.
             - Caso o cliente mude de assunto ou tenha dúvidas, responda de maneira natural antes de continuar as perguntas.
+            - Caso o usuário responda a pergunta com apenas um número, leve esse número como resposta correta.
 
                 **Objetivo:** 
             - Coletar essas informações de forma natural, sem parecer um questionário mecânico.
             - Adaptar-se ao tom da conversa do usuário, garantindo uma interação fluida.
+            - Retornar "OK" quando todas as perguntas forem respondidas corretamente.
      '''),
 
     ("human", "{user_input}"),
@@ -105,13 +108,12 @@ while True:
 
     history.add_message(HumanMessage(content=user_input))
     chat_history = get_recent_chat_history(history)
-    print(chat_history)
 
     if asking_questions:
         chain = client_questions_template | model | StrOutputParser()
         response = chain.invoke({"user_input": user_input, "chat_history": chat_history})
         
-        if "todas as perguntas foram respondidas" in response.lower():
+        if "OK" in response.lower():
             print("\nSofia: Obrigada! Agora podemos continuar com o agendamento.")
             asking_questions = False
             chain = schedule_template | model | StrOutputParser()
