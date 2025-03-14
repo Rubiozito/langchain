@@ -13,7 +13,7 @@ load_dotenv()
 model = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
 
 mongo_uri = os.getenv("MONGO_URI")
-history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat6", database_name="langchain-socium")
+history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat7", database_name="langchain-socium")
 
 system_message = SystemMessage(
     content="Você é Sofia, uma atendente virtual da empresa Socium."
@@ -22,7 +22,7 @@ system_message = SystemMessage(
             "Pergunte ao usuário o que deseja e classifique a intenção."
 )
 
-#Get history
+#Get history    
 
 if not history.messages:
     history.add_message(system_message)
@@ -39,6 +39,8 @@ def get_recent_chat_history(history, max_messages=10):
 # Prompt de identificação da intenção do usuário
 identification_template = ChatPromptTemplate.from_messages([
     ("system", "Você é Sofia, uma atendente virtual da empresa Socium. Você possui o histórico de mensagens do usuário, sempre use o histórico para manter o contexto coerente e te ajudar na tomada de decisões."
+                "Aqui está o histórico recente da conversa:\n\n"
+               "{chat_history}\n\n"
                "Identifique a intenção do usuário entre estas opções: "
                "'Conhecer a empresa' ou 'Agendar uma reunião'."
                "Responda apenas com a opção mais adequada."),
@@ -47,7 +49,9 @@ identification_template = ChatPromptTemplate.from_messages([
 
 # Prompt de apresentação da empresa
 presentation_template = ChatPromptTemplate.from_messages([
-    ("system", f"Você é Sofia, uma atendente virtual da empresa Socium. Você possui o histórico de mensagens do usuário, sempre use o histórico para manter o contexto coerente e te ajudar na tomada de decisões. você deve apresentar a empresa com base nas seguintes informações: {infos_socium}. "),
+    ("system", f"Você é Sofia, uma atendente virtual da empresa Socium. Você possui o histórico de mensagens do usuário, sempre use o histórico para manter o contexto coerente e te ajudar na tomada de decisões. você deve apresentar a empresa com base nas seguintes informações: {infos_socium}. "
+     "Aqui está o histórico recente da conversa:\n\n"
+               "{chat_history}\n\n"),
     ("human", "{user_input}"),
 ])
 
@@ -55,13 +59,17 @@ presentation_template = ChatPromptTemplate.from_messages([
 # Prompt de agendamento de reunião
 schedule_template = ChatPromptTemplate.from_messages([
     ("system", "Você é Sofia, uma atendente virtual da empresa Socium. Você possui o histórico de mensagens do usuário, sempre use o histórico para manter o contexto coerente e te ajudar na tomada de decisões."
-               "Ajude o usuário a agendar uma reunião. Pergunte sobre "
-               "disponibilidade de horário e informações de contato."),
+            "Aqui está o histórico recente da conversa:\n\n"
+            "{chat_history}\n\n"
+            "Ajude o usuário a agendar uma reunião. Pergunte sobre "
+            "disponibilidade de horário e informações de contato."),
     ("human", "{user_input}"),
 ])
 
 client_questions_template = ChatPromptTemplate.from_messages([
-    ("system", '''Você é Sofia, uma atendente virtual da empresa Socium. 
+    ("system", '''Você é Sofia, uma atendente virtual da empresa Socium.
+            Aqui está o histórico recente da conversa:\n\n
+               {chat_history}\n\n"
                Seu objetivo é coletar algumas informações do cliente antes de agendar uma reunião. 
                Você deve fazer 3 perguntas sequenciais, garantindo um fluxo natural da conversa.
 
@@ -76,7 +84,7 @@ client_questions_template = ChatPromptTemplate.from_messages([
             - **Nunca repita** uma pergunta que já foi respondida corretamente.
             - Se o cliente não responder corretamente ou der uma resposta vaga, reformule a pergunta para obter uma resposta clara.
             - Use o **histórico de mensagens** para lembrar quais perguntas já foram feitas e garantir um fluxo natural da conversa.
-            - Se todas as perguntas forem respondidas, finalize essa etapa e prossiga para o agendamento da reunião.
+            - Se todas as perguntas forem respondidas, retorne apenas: "Todas as perguntas foram respondidas."
             - Caso o cliente mude de assunto ou tenha dúvidas, responda de maneira natural antes de continuar as perguntas.
 
                 **Objetivo:** 
@@ -96,17 +104,14 @@ while True:
         break
 
     history.add_message(HumanMessage(content=user_input))
-
     chat_history = get_recent_chat_history(history)
-
-    classification_response = identification_template | model | StrOutputParser()
-    classification = classification_response.invoke({"user_input": user_input, "chat_history": chat_history}).strip().lower()
+    print(chat_history)
 
     if asking_questions:
         chain = client_questions_template | model | StrOutputParser()
         response = chain.invoke({"user_input": user_input, "chat_history": chat_history})
         
-        if "Todas as perguntas foram respondidas" in response.lower():
+        if "todas as perguntas foram respondidas" in response.lower():
             print("\nSofia: Obrigada! Agora podemos continuar com o agendamento.")
             asking_questions = False
             chain = schedule_template | model | StrOutputParser()
@@ -115,17 +120,19 @@ while True:
             history.add_message(AIMessage(content=response))
             continue  
 
-    if "conhecer a empresa" in classification:
-        chain = presentation_template | model | StrOutputParser() 
-    elif "agendar uma reunião" in classification:
-
-        chain = schedule_template | model | StrOutputParser()
     else:
-        chain = RunnableLambda(lambda x: "Desculpe, não entendi sua solicitação. Você deseja conhecer a empresa ou agendar uma reunião?")
+        classification_response = identification_template | model | StrOutputParser()
+        classification = classification_response.invoke({"user_input": user_input, "chat_history": chat_history}).strip().lower()
 
+        if "conhecer a empresa" in classification:
+            chain = presentation_template | model | StrOutputParser()
+        elif "agendar uma reunião" in classification:
+            print("\nSofia: Antes de prosseguirmos com o agendamento, preciso fazer algumas perguntas sobre sua empresa.")
+            asking_questions = True  
+            chain = client_questions_template | model | StrOutputParser()
+        else:
+            chain = RunnableLambda(lambda x: "Desculpe, não entendi sua solicitação. Você deseja conhecer a empresa ou agendar uma reunião?")
     response = chain.invoke({"user_input": user_input, "chat_history": chat_history})
-    history.add_message(AIMessage(content=response))
-
     print(f"Sofia: {response}")
 
 
