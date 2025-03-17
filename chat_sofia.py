@@ -13,7 +13,7 @@ load_dotenv()
 model = ChatOpenAI(model="gpt-4o", api_key=os.getenv("OPENAI_API_KEY"))
 
 mongo_uri = os.getenv("MONGO_URI")
-history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat10", database_name="langchain-socium")
+history = MongoDBChatMessageHistory(connection_string=mongo_uri, session_id="user_chat12", database_name="langchain-socium")
 
 system_message = SystemMessage(
     content="Você é Sofia, uma atendente virtual da empresa Socium."
@@ -92,13 +92,24 @@ client_questions_template = ChatPromptTemplate.from_messages([
                 **Objetivo:** 
             - Coletar essas informações de forma natural, sem parecer um questionário mecânico.
             - Adaptar-se ao tom da conversa do usuário, garantindo uma interação fluida.
-            - Retornar "OK" quando todas as perguntas forem respondidas corretamente.
+            
+            Após coletar as informações, responda apenas "OK" para continuar com o agendamento da reunião.
      '''),
 
     ("human", "{user_input}"),
 ])
 
+questions = [
+    "Qual o número aproximado de funcionários da empresa?",
+    "Qual a idade da empresa?",
+    "A empresa está em processo de transformação tecnológica?"
+]
+
+questions_index = 0
+
 asking_questions = False
+questions_answered = False
+
 
 #chat loop
 while True:
@@ -110,18 +121,37 @@ while True:
     chat_history = get_recent_chat_history(history)
 
     if asking_questions:
-        chain = client_questions_template | model | StrOutputParser()
+        if questions_index >= len(questions):
+            print("\nSofia: Obrigada! Já coletei todas as informações necessárias")
+            asking_questions = False
+            questions_answered = True
+            continue
+        prompt_text = f"""Você é Sofia, uma atendente virtual da empresa Socium.
+Aqui está o histórico recente da conversa:
+{chat_history}
+
+Sua próxima pergunta é:
+{questions[questions_index]}
+
+Regras:
+- Faça somente uma pergunta por vez e aguarde a resposta.
+- Não repita perguntas já respondidas.
+- Se a resposta não estiver clara, reformule a pergunta para obter uma resposta precisa.
+Após a coleta de todas as informações, responda apenas "OK" para prosseguir.
+"""
+        chain = RunnableLambda(lambda x: prompt_text) | model | StrOutputParser()
         response = chain.invoke({"user_input": user_input, "chat_history": chat_history})
-        
-        if "OK" in response.lower():
+
+        if response.strip().lower() == "ok":
             print("\nSofia: Obrigada! Agora podemos continuar com o agendamento.")
             asking_questions = False
-            chain = schedule_template | model | StrOutputParser()
+            questions_answered = True
         else:
             print(f"Sofia: {response}")
             history.add_message(AIMessage(content=response))
+            indice_pergunta += 1
             continue  
-
+        
     else:
         classification_response = identification_template | model | StrOutputParser()
         classification = classification_response.invoke({"user_input": user_input, "chat_history": chat_history}).strip().lower()
@@ -129,7 +159,6 @@ while True:
         if "conhecer a empresa" in classification:
             chain = presentation_template | model | StrOutputParser()
         elif "agendar uma reunião" in classification:
-            print("\nSofia: Antes de prosseguirmos com o agendamento, preciso fazer algumas perguntas sobre sua empresa.")
             asking_questions = True  
             chain = client_questions_template | model | StrOutputParser()
         else:
@@ -142,4 +171,5 @@ print("\nChat History:")
 for msg in history.messages:
     role = "Você" if isinstance(msg, HumanMessage) else "Sofia"
     print(f"{role}: {msg.content}")
+
 
